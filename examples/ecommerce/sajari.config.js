@@ -16,6 +16,14 @@ export default {
   // Whether to enable grid view by default
   display: 'grid',
 
+  // Default display type (grid|list)
+  display: 'list',
+
+  // Set the tracking config
+  tracking: {
+    field: 'url', // Usually this is 'url'
+  },
+
   // Which facets to display
   // Order in the UI is defined by their order here
   // field: Field to use in results
