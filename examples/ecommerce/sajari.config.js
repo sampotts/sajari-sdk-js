@@ -13,15 +13,12 @@ export default {
   // For production this can be undefined
   endpoint: 'https://jsonapi-us-valkyrie-beta1.sajari.net',
 
-  // Whether to enable grid view by default
-  display: 'grid',
-
   // Default display type (grid|list)
-  display: 'list',
+  display: 'grid',
 
   // Set the tracking config
   tracking: {
-    field: 'url', // Usually this is 'url'
+    field: 'title', // Usually this is 'url'
   },
 
   // Which facets to display
@@ -37,11 +34,6 @@ export default {
     { field: 'imageTags', title: 'Color', type: filterTypes.color },
     // { field: 'rating', title: 'Rating', type: filterTypes.rating },
   ],
-
-  // Set the tracking config
-  tracking: {
-    field: 'title', // Usually this is 'url'
-  },
 
   // A map for data fields
   // If a function is specified, the record data will be passed as the single argument
