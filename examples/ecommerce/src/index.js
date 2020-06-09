@@ -8,7 +8,6 @@ import env from '../sajari.config';
 import Button, { buttonSizes, buttonStyles } from './components/Button';
 import Filters from './components/Filters';
 import Checkbox from './components/Forms/Checkbox';
-import Input from './components/Forms/Input';
 import Label from './components/Forms/Label';
 import Select from './components/Forms/Select';
 import { IconGrid, IconList, Logomark } from './components/Icons';
@@ -16,13 +15,19 @@ import MenuToggle from './components/MenuToggle';
 import Message from './components/Message';
 import Pagination from './components/Pagination';
 import Results from './components/Results';
-import SearchInput from './components/Search/Input';
+import Combobox from './components/Search/Combobox';
 import Request from './models/Request';
 import { parseStateFromUrl, setStateToUrl } from './utils/history';
+import is from './utils/is';
 import { formatNumber } from './utils/number';
 import { toSentenceCase } from './utils/string';
 
-const { project, collection, pipeline, version, endpoint, facets, display, tracking } = env;
+/* TODO:
+- Use context for search term and filtering etc
+- Use hooks for shared logic
+*/
+
+const { project, collection, pipeline, version, endpoint, facets, buckets, display, tracking } = env;
 
 const defaults = {
   pageSize: 15,
@@ -40,6 +45,7 @@ export default class App extends Component {
       init: true,
       results: null,
       aggregates: null,
+      aggregateFilters: null,
       totalResults: 0,
       time: 0,
       error: null,
@@ -50,12 +56,15 @@ export default class App extends Component {
       grid: display && display === 'grid',
       suggest: false,
       suggestions: [],
-      settingsShown: false,
       menuOpen: false,
 
       // Pipeline
+      pipelines: {},
       pipeline,
       version,
+
+      // Merge state from URL
+      ...parseStateFromUrl({ defaults }),
     };
   }
 
@@ -63,9 +72,18 @@ export default class App extends Component {
     this.client = new Client(project, collection, endpoint);
     this.session = new InteractiveSession('q', new DefaultSession(TrackingType.Click, tracking.field, {}));
 
-    this.updatePipeline();
+    this.getPipeline()
+      .then(() => {
+        this.updatePipeline();
+        this.search(false);
+      })
+      .catch((error) =>
+        this.setState({
+          error,
+        }),
+      );
 
-    this.parseHistory();
+    this.client.listPipelines().then(this.setPipelines);
 
     this.listeners(true);
   }
@@ -82,7 +100,26 @@ export default class App extends Component {
 
   setHistory = (replace) => setStateToUrl({ state: this.state, replace, defaults });
 
-  parseHistory = () => this.setState(parseStateFromUrl({ defaults }), () => this.search(false));
+  setPipelines = (pipelines) => {
+    if (is.empty(pipelines)) {
+      this.setState({ pipelines: {} });
+      return;
+    }
+
+    const list = pipelines.reduce((obj, { identifier }) => {
+      const { name, version } = identifier;
+
+      if (!Object.keys(obj).includes(name)) {
+        obj[name] = [];
+      }
+
+      obj[name].push(version);
+
+      return obj;
+    }, {});
+
+    this.setState({ pipelines: list });
+  };
 
   updatePipeline = () => {
     const { pipeline, version } = this.state;
@@ -92,6 +129,27 @@ export default class App extends Component {
       autocomplete: this.client.pipeline('autocomplete'),
     };
   };
+
+  getPipeline = () =>
+    new Promise((resolve, reject) => {
+      const { pipeline, version } = this.state;
+
+      if (!version) {
+        this.client
+          .getDefaultPipelineVersion(pipeline)
+          .then(({ version: defaultVersion }) => {
+            this.setState(
+              {
+                version: defaultVersion,
+              },
+              () => resolve(defaultVersion),
+            );
+          })
+          .catch(reject);
+      } else {
+        resolve({ version });
+      }
+    });
 
   getSuggestions = (query) => {
     const request = new Request(query);
@@ -113,11 +171,19 @@ export default class App extends Component {
     request.filters = filters;
     request.pageSize = pageSize;
     request.page = page;
-    request.facets = facets.map((f) => f.field);
+    request.facets = facets;
+    request.buckets = buckets;
+    request.filter = Object.entries(filters)
+      .filter(([key]) => facets.find(({ field, buckets }) => field === key && !is.empty(buckets)))
+      .reduce((filter, [, values]) => values.map((v) => buckets[v]), [])
+      .map((v) => `(${v})`)
+      .join(' OR ');
 
     if (sort) {
       request.sort = sort;
     }
+
+    // console.log(JSON.stringify(request.serialize(), null, 2));
 
     // Hide the suggestions and error
     this.setState({
@@ -128,12 +194,13 @@ export default class App extends Component {
     let time = 0;
     let totalResults = 0;
     let aggregates = null;
+    let aggregateFilters = null;
 
     this.pipeline.main
       .search(request.serialize(), this.session.next(request.serialize()))
       .then(([response]) => {
         if (response) {
-          ({ aggregateFilters: aggregates, results, time, totalResults } = response);
+          ({ aggregateFilters, aggregates, results, time, totalResults } = response);
         }
 
         clearTimeout(this.renderTimer);
@@ -145,6 +212,7 @@ export default class App extends Component {
           () =>
             this.setState({
               aggregates,
+              aggregateFilters,
               time,
               totalResults,
               results,
@@ -160,8 +228,8 @@ export default class App extends Component {
       })
       .catch((error) => {
         // eslint-disable-next-line no-console
-        console.error('Query failed', { ...request.serialize() });
-        this.setState({ aggregates, time, totalResults, results, init: false, error });
+        console.error('Query failed', JSON.stringify(request.serialize(), null, 2));
+        this.setState({ aggregates, aggregateFilters, time, totalResults, results, init: false, error });
       });
   };
 
@@ -296,27 +364,48 @@ export default class App extends Component {
   setPipeline = (event) => {
     event.preventDefault();
 
-    const formData = new FormData(event.target);
+    const { value, id } = event.target;
 
-    this.setState(
-      {
-        pipeline: formData.get('pipeline'),
-        version: formData.get('version'),
-      },
-      () => {
-        this.updatePipeline();
+    const callback = () => {
+      this.updatePipeline();
+      this.search();
+    };
 
-        this.search();
-      },
-    );
-  };
+    if (id === 'pipeline') {
+      const { pipelines } = this.state;
+      let { version } = this.state;
+      const versions = pipelines[value];
 
-  toggleSettingsShown = () => {
-    const { settingsShown } = this.state;
+      // Default to first version
+      if (!versions.includes(version)) {
+        [version] = versions;
 
-    this.setState({
-      settingsShown: !settingsShown,
-    });
+        this.client.getDefaultPipelineVersion(value).then(({ version }) => {
+          this.setState(
+            {
+              pipeline: value,
+              version,
+            },
+            callback,
+          );
+        });
+      } else {
+        this.setState(
+          {
+            pipeline: value,
+            version,
+          },
+          callback,
+        );
+      }
+    } else if (id === 'version') {
+      this.setState(
+        {
+          version: value,
+        },
+        callback,
+      );
+    }
   };
 
   toggleMenu = () => {
@@ -330,12 +419,13 @@ export default class App extends Component {
   renderSidebar = () => {
     const {
       aggregates,
+      aggregateFilters,
       filters,
       instant,
       query,
-      settingsShown,
       menuOpen,
       pipeline,
+      pipelines,
       results,
       suggest,
       version,
@@ -387,45 +477,44 @@ export default class App extends Component {
 
             <Filters
               facets={facets}
+              buckets={buckets}
               aggregates={aggregates}
+              aggregateFilters={aggregateFilters}
               filters={filters}
               query={query}
               onChange={this.setFilter}
             />
 
-            <form onSubmit={this.setPipeline} className="mb-6">
-              <div className="flex items-center mb-2">
-                <h2 className="text-xs font-medium text-gray-400 uppercase">Pipeline</h2>
-                <button
-                  type="button"
-                  onClick={this.toggleSettingsShown}
-                  className="ml-auto text-xs text-blue-500 uppercase"
-                >
-                  {!settingsShown ? 'Show' : 'Hide'}
-                </button>
-              </div>
+            {pipelines && Object.keys(pipelines).includes(pipeline) && (
+              <div className="mb-6">
+                <div className="flex items-center mb-2">
+                  <h2 className="text-xs font-medium text-gray-400 uppercase">Pipeline</h2>
+                </div>
 
-              <div hidden={!settingsShown}>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-3 gap-2">
                   <div className="col-span-2">
                     <Label htmlFor="pipeline" className="block mb-2 text-sm text-gray-500">
-                      Pipeline
+                      Name
                     </Label>
-                    <Input id="pipeline" name="pipeline" value={pipeline} />
+                    <Select id="pipeline" value={pipeline} onChange={this.setPipeline}>
+                      {Object.keys(pipelines).map((p) => (
+                        <option value={p}>{p}</option>
+                      ))}
+                    </Select>
                   </div>
                   <div>
                     <Label htmlFor="version" className="block mb-2 text-sm text-gray-500">
                       Version
                     </Label>
-                    <Input id="version" name="version" type="number" value={version} />
+                    <Select id="version" value={version} onChange={this.setPipeline}>
+                      {pipelines[pipeline].map((v) => (
+                        <option value={v}>{v}</option>
+                      ))}
+                    </Select>
                   </div>
                 </div>
-
-                <Button type="submit" block style={buttonStyles.primary} className="mt-4">
-                  Save
-                </Button>
               </div>
-            </form>
+            )}
           </nav>
         </div>
       </aside>
@@ -530,7 +619,7 @@ export default class App extends Component {
               <h1 className="sr-only">Sajari JavaScript SDK Demo</h1>
 
               <div className="flex-1 lg:flex lg:items-center">
-                <SearchInput
+                <Combobox
                   id="q"
                   value={query}
                   instant={instant}

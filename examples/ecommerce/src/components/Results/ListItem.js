@@ -1,4 +1,5 @@
 /* eslint-disable react/prop-types */
+import is from '../../utils/is';
 import { formatNumber } from '../../utils/number';
 import { IconCheck } from '../Icons';
 import Rating from '../Rating';
@@ -6,7 +7,7 @@ import Image from './Image';
 
 const ListItem = ({ data }) => (
   <article className="flex items-center w-full mb-8" key={data.id}>
-    <a href={data.url} target="_blank" rel="noreferrer noopener" className="block w-24 mr-6">
+    <a href={data.url} target="_blank" rel="noreferrer noopener" className="block w-24 h-24 mr-6">
       <Image src={data.image} alt={data.title} />
     </a>
 
@@ -18,19 +19,21 @@ const ListItem = ({ data }) => (
               {data.title}
             </a>
           </h1>
-          <div className="mt-1 md:flex md:items-center">
-            <p className="hidden text-xs text-gray-400 md:block">{data.category}</p>
+          {(!is.empty(data.category) || data.rating) && (
+            <div className="mt-1 md:flex md:items-center">
+              {data.category && <p className="hidden text-xs text-gray-400 md:block md:mr-4">{data.category}</p>}
 
-            {data.rating && (
-              <p className="flex items-center mt-2 md:mt-0 md:ml-4">
-                <Rating value={Number(data.rating)} />
-              </p>
-            )}
-          </div>
+              {data.rating && (
+                <p className="flex items-center mt-2 md:mt-0">
+                  <Rating value={Number(data.rating)} />
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="mt-3 md:mt-0 md:ml-6 md:text-right">
-          {data.price && <h2>{formatNumber(data.price, 'USD', true)}</h2>}
+          {data.price && <h2>{formatNumber(Number(data.price), 'USD', true)}</h2>}
 
           {data.freeShipping === 'true' && (
             <span className="inline-flex items-center text-xs font-medium text-green-500 md:ml-4">
@@ -42,7 +45,7 @@ const ListItem = ({ data }) => (
       </div>
 
       <p
-        className="hidden mt-2 text-sm text-gray-500 md:block"
+        className="mt-2 text-sm text-gray-500 truncate-2-lines"
         dangerouslySetInnerHTML={{ __html: data.description }}
       />
     </div>

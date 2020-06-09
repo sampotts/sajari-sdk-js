@@ -6,8 +6,8 @@ import Image from './Image';
 
 const GridItem = ({ data }) => (
   <article className="mb-8 text-center" key={data.id}>
-    <a href={data.url} target="_blank" rel="noreferrer noopener" className="block mb-3">
-      <Image src={data.image} alt={data.title} />
+    <a href={data.url} target="_blank" rel="noreferrer noopener" className="relative block h-0 mb-3 pb-full">
+      <Image src={data.image} alt={data.title} className="absolute" />
     </a>
 
     <h1 className="mt-4 font-medium text-gray-900">
@@ -22,7 +22,7 @@ const GridItem = ({ data }) => (
       </p>
     )}
 
-    {data.price && <h2 className="mt-2 text-gray-500">{formatNumber(data.price, 'USD', true)}</h2>}
+    {data.price && <h2 className="mt-2 text-gray-500">{formatNumber(Number(data.price), 'USD', true)}</h2>}
 
     {data.freeShipping === 'true' && (
       <span className="inline-flex items-center ml-4 text-xs font-medium text-green-500">
