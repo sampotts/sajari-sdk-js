@@ -63,4 +63,9 @@ export default {
     freeShipping: 'free_shipping',
     category: ['product_type', 'titlecase'],
   },
+
+  // Key / Value pairs to add to the request
+  paramaters: {
+    // key: 'value',
+  },
 };
